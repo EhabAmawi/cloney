@@ -1,6 +1,5 @@
 import tempfile
 import shutil
-import os
 import time
 import functools
 from cloney.logger import logging

@@ -4,7 +4,7 @@ from azure.storage.blob import BlobServiceClient
 import oss2
 import os
 from cloney.logger import logging
-from cloney.storage import get_spaces_client
+from cloney.storage import get_spaces_client, get_s3_compatible_client
 
 
 def check_source_bucket(source_service, source_bucket):
@@ -15,6 +15,14 @@ def check_source_bucket(source_service, source_bucket):
             return True
         except Exception as e:
             logging.warning(f"S3 Bucket {source_bucket} not found: {e}")
+            return False
+    elif source_service == "s3-compatible":
+        try:
+            s3_client = get_s3_compatible_client()
+            s3_client.head_bucket(Bucket=source_bucket)
+            return True
+        except Exception as e:
+            logging.warning(f"S3-compatible Bucket {source_bucket} not found: {e}")
             return False
     elif source_service == "spaces":
         try:
@@ -66,7 +74,7 @@ def check_source_bucket(source_service, source_bucket):
             logging.warning(f"An error occurred while checking the OSS bucket: {e}")
             return False
     else:
-        logging.warning(f"Unsupported source service: {source_service}, did you mean s3, gcs, azure or oss?")
+        logging.warning(f"Unsupported source service: {source_service}, did you mean s3, s3-compatible, gcs, azure or oss?")
         return False
 
 
@@ -83,6 +91,20 @@ def check_destination_bucket(destination_service, destination_bucket, create_if_
                 return True
             else:
                 logging.warning(f"S3 Bucket {destination_bucket} not found, pass --create-destination-bucket to create distination bucket.")
+                return False
+    elif destination_service == "s3-compatible":
+        try:
+            s3_client = get_s3_compatible_client()
+            s3_client.head_bucket(Bucket=destination_bucket)
+            return True
+        except Exception:
+            if create_if_missing:
+                s3_client = get_s3_compatible_client()
+                s3_client.create_bucket(Bucket=destination_bucket)
+                logging.info(f"Created S3-compatible Bucket {destination_bucket}")
+                return True
+            else:
+                logging.warning(f"S3-compatible Bucket {destination_bucket} not found, pass --create-destination-bucket to create destination bucket.")
                 return False
     elif destination_service == "spaces":
         spaces_client = get_spaces_client()

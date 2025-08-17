@@ -5,7 +5,7 @@ from azure.storage.blob import BlobServiceClient
 import oss2
 from cloney.logger import logging
 from cloney.utils import time_logger
-from cloney.storage import get_spaces_client
+from cloney.storage import get_spaces_client, get_s3_compatible_client
 
 def get_s3_objects(bucket_name):
     s3 = boto3.client("s3")
@@ -21,6 +21,25 @@ def get_s3_objects(bucket_name):
                 })
 
     return objects
+
+def get_s3_compatible_objects(bucket_name):
+    try:
+        s3 = get_s3_compatible_client()
+        objects = []
+
+        paginator = s3.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=bucket_name):
+            if "Contents" in page:
+                for obj in page["Contents"]:
+                    objects.append({
+                        "Key": obj["Key"],
+                        "Size": obj["Size"]
+                    })
+
+        return objects
+    except Exception as e:
+        logging.warning(f"S3-compatible Error: {e}")
+        return []
 
 def get_spaces_objects(bucket_name):
     try:
@@ -112,6 +131,8 @@ def compare_object_lists(source_service, source_bucket, destination_service, des
     destination_objects = []
     if source_service == "s3":
         source_objects = get_s3_objects(source_bucket)
+    elif source_service == "s3-compatible":
+        source_objects = get_s3_compatible_objects(source_bucket)
     elif source_service == "spaces":
         source_objects = get_spaces_objects(source_bucket)
     elif source_service == "gcs":
@@ -125,6 +146,8 @@ def compare_object_lists(source_service, source_bucket, destination_service, des
     
     if destination_service == "s3":
         destination_objects = get_s3_objects(destination_bucket)
+    elif destination_service == "s3-compatible":
+        destination_objects = get_s3_compatible_objects(destination_bucket)
     elif destination_service == "spaces":
         destination_objects = get_spaces_objects(destination_bucket)
     elif destination_service == "gcs":

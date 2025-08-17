@@ -23,6 +23,8 @@ _gcs_client_pool = None
 _gcs_pool_lock = threading.Lock()
 _s3_client_pool = None
 _s3_pool_lock = threading.Lock()
+_s3_compatible_client_pool = None
+_s3_compatible_pool_lock = threading.Lock()
 
 def get_spaces_client():
     global _spaces_client
@@ -53,6 +55,8 @@ def get_spaces_client():
 def download_from_source(source_service, source_bucket, local_dir):
     if source_service == "s3":
         download_s3_bucket(source_bucket, local_dir)
+    elif source_service == "s3-compatible":
+        download_s3_compatible_bucket(source_bucket, local_dir)
     elif source_service == "spaces":
         download_spaces_bucket(source_bucket, local_dir)
     elif source_service == "gcs":
@@ -68,6 +72,8 @@ def download_from_source(source_service, source_bucket, local_dir):
 def upload_to_destination(destination_service, destination_bucket, local_dir):
     if destination_service == "s3":
         upload_to_s3_bucket(destination_bucket, local_dir)
+    elif destination_service == "s3-compatible":
+        upload_to_s3_compatible_bucket(destination_bucket, local_dir)
     elif destination_service == "spaces":
         upload_to_spaces_bucket(destination_bucket, local_dir)
     elif destination_service == "gcs":
@@ -134,6 +140,62 @@ def download_s3_bucket(bucket_name, local_dir, max_workers=50):
                 worker_id += 1
         concurrent.futures.wait(futures)
 
+# --- S3-Compatible Functions ---
+
+def download_s3_compatible_file(bucket_name, object_key, local_dir, worker_id, max_retries=5):
+    s3_client = None
+    
+    local_path = os.path.join(local_dir, object_key)
+    os.makedirs(os.path.dirname(local_path), exist_ok=True)
+    
+    for attempt in range(max_retries):
+        try:
+            if s3_client is None:
+                s3_client = get_s3_compatible_client()
+            
+            s3_client.download_file(bucket_name, object_key, local_path)
+            logging.info(f"Worker {worker_id}: downloaded {object_key} from S3-compatible.")
+            return_s3_compatible_client(s3_client)
+            return
+        except Exception as e:
+            if "pool" in str(e).lower() or "connection" in str(e).lower() or "timeout" in str(e).lower():
+                if s3_client:
+                    try:
+                        return_s3_compatible_client(s3_client)
+                    except:
+                        pass
+                s3_client = None
+                
+            if attempt == max_retries - 1:
+                logging.warning(f"Worker {worker_id}: Failed to download {object_key} from S3-compatible after {max_retries} attempts - {e}")
+                if s3_client:
+                    try:
+                        return_s3_compatible_client(s3_client)
+                    except:
+                        pass
+            else:
+                wait_time = (2 ** attempt) + random.uniform(0, 1)
+                logging.info(f"Worker {worker_id}: Retry {attempt + 1} for {object_key} - {e}")
+                time.sleep(wait_time)
+
+def download_s3_compatible_bucket(bucket_name, local_dir, max_workers=50):
+    pool_size = min(max_workers, 40)
+    get_s3_compatible_client_pool(pool_size)
+    
+    s3 = get_s3_compatible_client()
+    paginator = s3.get_paginator("list_objects_v2")
+    return_s3_compatible_client(s3)
+    
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        worker_id = 0
+        futures = []
+        for page in paginator.paginate(Bucket=bucket_name):
+            for obj in page.get("Contents", []):
+                object_key = obj["Key"]
+                futures.append(executor.submit(download_s3_compatible_file, bucket_name, object_key, local_dir, worker_id))
+                worker_id += 1
+        concurrent.futures.wait(futures)
+
 # --- Google Cloud Storage Functions ---
 
 def get_gcs_client_pool(pool_size=10):
@@ -178,6 +240,46 @@ def get_s3_client():
 
 def return_s3_client(client):
     pool = get_s3_client_pool()
+    pool.put(client)
+
+def get_s3_compatible_client_pool(pool_size=10):
+    global _s3_compatible_client_pool, _s3_compatible_pool_lock
+    
+    if _s3_compatible_client_pool is not None:
+        return _s3_compatible_client_pool
+    
+    with _s3_compatible_pool_lock:
+        if _s3_compatible_client_pool is None:
+            _s3_compatible_client_pool = queue.Queue()
+            
+            endpoint_url = os.getenv("S3_COMPATIBLE_ENDPOINT")
+            access_key_id = os.getenv("S3_COMPATIBLE_ACCESS_KEY_ID") or os.getenv("AWS_ACCESS_KEY_ID")
+            secret_access_key = os.getenv("S3_COMPATIBLE_SECRET_ACCESS_KEY") or os.getenv("AWS_SECRET_ACCESS_KEY")
+            region = os.getenv("S3_COMPATIBLE_REGION", "auto")
+            
+            if not endpoint_url:
+                raise ValueError("ERROR: S3_COMPATIBLE_ENDPOINT must be set as environment variable for s3-compatible service.")
+            if not access_key_id or not secret_access_key:
+                raise ValueError("ERROR: S3_COMPATIBLE_ACCESS_KEY_ID and S3_COMPATIBLE_SECRET_ACCESS_KEY (or AWS_* equivalents) must be set as environment variables.")
+            
+            for _ in range(pool_size):
+                client = boto3.client(
+                    "s3",
+                    endpoint_url=endpoint_url,
+                    aws_access_key_id=access_key_id,
+                    aws_secret_access_key=secret_access_key,
+                    region_name=region
+                )
+                _s3_compatible_client_pool.put(client)
+    
+    return _s3_compatible_client_pool
+
+def get_s3_compatible_client():
+    pool = get_s3_compatible_client_pool()
+    return pool.get()
+
+def return_s3_compatible_client(client):
+    pool = get_s3_compatible_client_pool()
     pool.put(client)
 
 def download_gcs_file(bucket_name, blob_name, local_dir, worker_id, max_retries=5):
@@ -388,6 +490,57 @@ def upload_to_s3_bucket(bucket_name, local_dir, max_workers=50):
             for file in files:
                 local_path = os.path.join(root, file)
                 futures.append(executor.submit(upload_s3_file, bucket_name, local_path, local_dir, worker_id))
+                worker_id += 1
+        concurrent.futures.wait(futures)
+
+# --- S3-Compatible Upload Functions ---
+
+def upload_s3_compatible_file(bucket_name, local_path, local_dir, worker_id, max_retries=5):
+    s3_client = None
+    
+    object_key = posixpath.join(*os.path.relpath(local_path, local_dir).split(os.sep))
+    
+    for attempt in range(max_retries):
+        try:
+            if s3_client is None:
+                s3_client = get_s3_compatible_client()
+            
+            s3_client.upload_file(local_path, bucket_name, object_key)
+            logging.info(f"Worker {worker_id}: Uploaded {local_path} to S3-compatible as {object_key}.")
+            return_s3_compatible_client(s3_client)
+            return
+        except Exception as e:
+            if "pool" in str(e).lower() or "connection" in str(e).lower() or "timeout" in str(e).lower():
+                if s3_client:
+                    try:
+                        return_s3_compatible_client(s3_client)
+                    except:
+                        pass
+                s3_client = None
+                
+            if attempt == max_retries - 1:
+                logging.warning(f"Worker {worker_id}: Failed to upload {local_path} to S3-compatible after {max_retries} attempts - {e}")
+                if s3_client:
+                    try:
+                        return_s3_compatible_client(s3_client)
+                    except:
+                        pass
+            else:
+                wait_time = (2 ** attempt) + random.uniform(0, 1)
+                logging.info(f"Worker {worker_id}: Retry {attempt + 1} for {local_path} - {e}")
+                time.sleep(wait_time)
+
+def upload_to_s3_compatible_bucket(bucket_name, local_dir, max_workers=50):
+    pool_size = min(max_workers, 40)
+    get_s3_compatible_client_pool(pool_size)
+    
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = []
+        worker_id = 0
+        for root, _, files in os.walk(local_dir):
+            for file in files:
+                local_path = os.path.join(root, file)
+                futures.append(executor.submit(upload_s3_compatible_file, bucket_name, local_path, local_dir, worker_id))
                 worker_id += 1
         concurrent.futures.wait(futures)
 

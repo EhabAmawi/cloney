@@ -1,10 +1,10 @@
 # Cloney - Storage Migration CLI
 
-Cloney is a lightweight command-line tool designed to migrate files between different cloud storage providers seamlessly. It supports AWS S3, Google Cloud Storage (GCS), Alibaba Cloud OSS, DigitalOcean Spaces, and Azure Blob Storage, allowing you to move data efficiently.
+Cloney is a lightweight command-line tool designed to migrate files between different cloud storage providers seamlessly. It supports AWS S3, S3-compatible services (like Cloudflare R2), Google Cloud Storage (GCS), Alibaba Cloud OSS, DigitalOcean Spaces, and Azure Blob Storage, allowing you to move data efficiently.
 
 ## Features
 
-🔄 Migrate files between S3, GCS, OSS, Spaces and Azure Blob
+🔄 Migrate files between S3, S3-compatible services, GCS, OSS, Spaces and Azure Blob
 
 ⚡ Fast and efficient transfer with minimal configuration
 
@@ -52,6 +52,11 @@ cloney azure my-source-container azure my-destination-container
 cloney oss my-source-bucket oss my-destination-bucket
 ```
 
+**S3-Compatible Services (e.g., Cloudflare R2)**
+
+```sh
+cloney s3-compatible my-source-bucket s3-compatible my-destination-bucket
+```
 
 ### Cross-Cloud Transfers
 
@@ -79,6 +84,12 @@ cloney azure my-azure-container oss my-oss-bucket
 
 ```sh
 cloney s3 my-source-bucket spaces my-destination-bucket
+```
+
+**S3-Compatible to Any Service (e.g., Cloudflare R2 to GCS)**
+
+```sh
+cloney s3-compatible my-r2-bucket gcs my-gcs-bucket
 ```
 
 
@@ -170,6 +181,24 @@ $env:AZURE_STORAGE_CONNECTION_STRING="your-connection-string"
 $env:SPACES_ACCESS_KEY="your-access-key"
 $env:SPACES_SECRET_KEY="your-secret-key"
 $env:SPACES_REGION="your-region"
+```
+
+**S3-Compatible Services (Linux/macOS)**
+
+```sh
+export S3_COMPATIBLE_ENDPOINT=https://your-endpoint.com
+export S3_COMPATIBLE_ACCESS_KEY_ID=your-access-key
+export S3_COMPATIBLE_SECRET_ACCESS_KEY=your-secret-key
+export S3_COMPATIBLE_REGION=auto  # Optional, defaults to "auto"
+```
+
+**S3-Compatible Services (Windows PowerShell)**
+
+```sh
+$env:S3_COMPATIBLE_ENDPOINT="https://your-endpoint.com"
+$env:S3_COMPATIBLE_ACCESS_KEY_ID="your-access-key"
+$env:S3_COMPATIBLE_SECRET_ACCESS_KEY="your-secret-key"
+$env:S3_COMPATIBLE_REGION="auto"  # Optional, defaults to "auto"
 ```
 
 ## Contributing
